@@ -23,6 +23,5 @@ frontend/.env
 
 # Misc
 .DS_Store
-*.log
 .idea/
 .vscode/
