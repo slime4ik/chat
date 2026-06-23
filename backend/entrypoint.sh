@@ -15,8 +15,11 @@ while True:
 PY
 echo "Postgres is up."
 
-python manage.py makemigrations accounts chat uploads --noinput
-python manage.py migrate --noinput
+# Migrations are committed to the repo (apps/*/migrations). We ONLY apply them
+# here — never `makemigrations` at runtime, otherwise schema changes to existing
+# tables silently never get applied. `--fake-initial` lets an already-populated
+# database (tables present, 0001 not yet recorded) adopt the initial migration.
+python manage.py migrate --fake-initial --noinput
 python manage.py collectstatic --noinput
 
 exec "$@"

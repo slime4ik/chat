@@ -184,29 +184,65 @@ function ReplyButton({ onReply }) {
 }
 
 // Delete sits behind a small menu (open → click) so it can't be hit by accident
-// the way a one-tap button could.
+// the way a one-tap button could. The dropdown is rendered in a portal with
+// fixed positioning so it's never clipped by the scroll area and never creeps
+// over the chat header — it flips above/below the button depending on room.
+const MENU_W = 184;
+
 function MessageMenu({ onDelete, onEdit }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+
+  function place() {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(8, r.right - MENU_W),
+      window.innerWidth - MENU_W - 8
+    );
+    const openUp = window.innerHeight - r.bottom < 160;
+    setPos(
+      openUp
+        ? { left, bottom: window.innerHeight - r.top + 6 }
+        : { left, top: r.bottom + 6 }
+    );
+  }
+
+  function toggle() {
+    if (!open) place();
+    setOpen((v) => !v);
+  }
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      if (btnRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target)) return;
+      setOpen(false);
     };
-    const onEsc = (e) => e.key === "Escape" && setOpen(false);
+    const onKey = (e) => e.key === "Escape" && setOpen(false);
+    const close = () => setOpen(false);
     document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onEsc);
+    document.addEventListener("keydown", onKey);
+    // Fixed menu doesn't follow the list — just close it on scroll/resize.
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onEsc);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
     };
   }, [open]);
 
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
-        onClick={() => setOpen((v) => !v)}
+        ref={btnRef}
+        onClick={toggle}
         className={`shrink-0 h-7 w-7 grid place-items-center rounded-full text-slate-400 hover:text-slate-100 hover:bg-ink-600 transition mb-1 ${
           open ? "opacity-100" : "opacity-60 md:opacity-0 md:group-hover:opacity-100"
         }`}
@@ -214,32 +250,44 @@ function MessageMenu({ onDelete, onEdit }) {
       >
         <MoreVertical size={15} />
       </button>
-      {open && (
-        <div className="absolute z-20 bottom-9 right-0 min-w-[160px] rounded-xl bg-ink-800 border border-ink-600 shadow-xl py-1 overflow-hidden">
-          {onEdit && (
+      {open && pos &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: "fixed",
+              left: pos.left,
+              top: pos.top,
+              bottom: pos.bottom,
+              width: MENU_W,
+            }}
+            className="z-50 rounded-xl bg-ink-800 border border-ink-600 shadow-xl py-1 overflow-hidden"
+          >
+            {onEdit && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onEdit();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-ink-700 text-left"
+              >
+                <Pencil size={15} className="shrink-0" />
+                Редактировать
+              </button>
+            )}
             <button
               onClick={() => {
                 setOpen(false);
-                onEdit();
+                onDelete?.();
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-ink-700 text-left"
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-300 hover:bg-ink-700 text-left"
             >
-              <Pencil size={15} className="shrink-0" />
-              Редактировать
+              <Trash2 size={15} className="shrink-0" />
+              Удалить у всех
             </button>
-          )}
-          <button
-            onClick={() => {
-              setOpen(false);
-              onDelete?.();
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-300 hover:bg-ink-700 text-left"
-          >
-            <Trash2 size={15} className="shrink-0" />
-            Удалить у всех
-          </button>
-        </div>
-      )}
-    </div>
+          </div>,
+          document.body
+        )}
+    </>
   );
 }

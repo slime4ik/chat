@@ -9,9 +9,9 @@ venv/
 .env
 backend/media/
 backend/staticfiles/
-backend/**/migrations/*.py
-!backend/**/migrations/__init__.py
 db.sqlite3
+# NOTE: migrations are committed on purpose (apps/*/migrations). Do NOT ignore
+# them — the deploy applies committed migrations and never runs makemigrations.
 
 # Node
 node_modules/
