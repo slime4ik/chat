@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Django
+.env
+backend/media/
+backend/staticfiles/
+backend/**/migrations/*.py
+!backend/**/migrations/__init__.py
+db.sqlite3
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.env
+
+# TLS certs (issued on the server by acme.sh)
+/certs/
+
+# Misc
+.DS_Store
+*.log
+.idea/
+.vscode/

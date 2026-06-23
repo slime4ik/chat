@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Use the dynamic viewport height on mobile so the composer isn't hidden
+   behind the browser's address bar. */
+#root {
+  height: 100dvh;
+}
+
+body {
+  @apply bg-ink-900 text-slate-100 antialiased;
+  overscroll-behavior: none;
+}
+
+/* Slim scrollbars that fit the dark theme. */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  @apply bg-ink-600 rounded-full;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

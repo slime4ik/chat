@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: ./.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  # One service serves everything: React SPA + REST API + WebSocket, on :8000.
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: ./.env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      # Имена томов совпадают с дефолтами djaploy (Volume медиа / Volume статики),
+      # чтобы Caddy отдавал /media/* и /static/* из тех же томов, куда пишет backend.
+      - media_volume:/app/media
+      - static_volume:/app/staticfiles
+    ports:
+      - "${HTTP_PORT:-8000}:8000"
+
+volumes:
+  pgdata:
+  media_volume:
+  static_volume:
