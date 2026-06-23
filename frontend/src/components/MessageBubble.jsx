@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, CheckCheck, CornerUpLeft, FileText, X, Clock3, AlertCircle } from "lucide-react";
+import { Check, CheckCheck, CornerUpLeft, FileText, X, Clock3, AlertCircle, Trash2, MoreVertical, Ban, Pencil } from "lucide-react";
 import { formatTime, humanSize } from "../lib/format.js";
 
 function ReadTicks({ read }) {
@@ -81,15 +81,42 @@ function Attachment({ att }) {
   );
 }
 
-export default function MessageBubble({ message, onReply }) {
+export default function MessageBubble({ message, onReply, onDelete, onEdit }) {
   const mine = message.is_mine;
   const hasMedia = message.attachments?.length > 0;
 
+  // A deleted message lives on as a muted, non-interactive tombstone.
+  if (message.is_deleted) {
+    return (
+      <div className={`group flex items-end ${mine ? "justify-end" : "justify-start"}`}>
+        <div
+          className={`max-w-[85%] sm:max-w-[65%] min-w-0 rounded-2xl px-2.5 py-2 border border-dashed ${
+            mine ? "border-white/15 rounded-br-md" : "border-ink-600 rounded-bl-md"
+          } bg-transparent`}
+        >
+          <div className="flex items-center gap-1.5 text-[14px] italic text-slate-400/80">
+            <Ban size={14} className="shrink-0" />
+            <span>Сообщение удалено</span>
+            <span className="text-[10px] not-italic text-slate-500 ml-1">
+              {formatTime(message.created_at)}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`group flex items-end gap-1 ${mine ? "justify-end" : "justify-start"}`}>
-      {/* Reply button on the left for own messages */}
+      {/* Actions on the left for own messages: reply (quick) + protected menu.
+          Delete is hidden until the message is actually saved on the server. */}
       {mine && (
-        <ReplyButton onReply={onReply} />
+        <div className="flex items-center">
+          {!message.sending && !String(message.id).startsWith("tmp_") && (
+            <MessageMenu onDelete={onDelete} onEdit={message.text ? onEdit : null} />
+          )}
+          <ReplyButton onReply={onReply} />
+        </div>
       )}
 
       <div
@@ -103,8 +130,10 @@ export default function MessageBubble({ message, onReply }) {
               {message.reply_to.sender_nickname}
             </div>
             <div className="opacity-70 truncate">
-              {message.reply_to.text ||
-                (message.reply_to.has_attachment ? "Вложение" : "")}
+              {message.reply_to.is_deleted
+                ? "Сообщение удалено"
+                : message.reply_to.text ||
+                  (message.reply_to.has_attachment ? "Вложение" : "")}
             </div>
           </div>
         )}
@@ -124,6 +153,7 @@ export default function MessageBubble({ message, onReply }) {
         )}
 
         <div className="flex items-center justify-end gap-1 mt-0.5 text-[10px] text-slate-200/70 select-none">
+          {message.edited_at && <span className="italic opacity-80">ред.</span>}
           <span>{formatTime(message.created_at)}</span>
           {mine && message.error ? (
             <AlertCircle size={14} className="text-red-300" />
@@ -150,5 +180,66 @@ function ReplyButton({ onReply }) {
     >
       <CornerUpLeft size={15} />
     </button>
+  );
+}
+
+// Delete sits behind a small menu (open → click) so it can't be hit by accident
+// the way a one-tap button could.
+function MessageMenu({ onDelete, onEdit }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const onEsc = (e) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`shrink-0 h-7 w-7 grid place-items-center rounded-full text-slate-400 hover:text-slate-100 hover:bg-ink-600 transition mb-1 ${
+          open ? "opacity-100" : "opacity-60 md:opacity-0 md:group-hover:opacity-100"
+        }`}
+        title="Ещё"
+      >
+        <MoreVertical size={15} />
+      </button>
+      {open && (
+        <div className="absolute z-20 bottom-9 right-0 min-w-[160px] rounded-xl bg-ink-800 border border-ink-600 shadow-xl py-1 overflow-hidden">
+          {onEdit && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                onEdit();
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-ink-700 text-left"
+            >
+              <Pencil size={15} className="shrink-0" />
+              Редактировать
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setOpen(false);
+              onDelete?.();
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-300 hover:bg-ink-700 text-left"
+          >
+            <Trash2 size={15} className="shrink-0" />
+            Удалить у всех
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

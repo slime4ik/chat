@@ -14,10 +14,14 @@ from .services import (
     broadcast_chat_request,
     broadcast_conv_status,
     broadcast_conv_status_for_pair,
+    broadcast_delete,
+    broadcast_edit,
     broadcast_new_message,
     broadcast_read,
     create_message,
     decline_conversation,
+    delete_message,
+    edit_message,
     mark_read,
 )
 
@@ -117,6 +121,8 @@ def messages(request, conversation_id):
     conv = _get_membership_or_404(request.user, conversation_id)
 
     if request.method == "GET":
+        # Deleted messages stay in history as a "message removed" tombstone,
+        # so we still return them (just stripped of their content server-side).
         qs = conv.messages.select_related("sender", "reply_to__sender") \
             .prefetch_related("attachments")
         before = request.query_params.get("before")
@@ -165,6 +171,45 @@ def messages(request, conversation_id):
     ctx = {"request": request, "me_id": request.user.id}
     return Response(MessageSerializer(message, context=ctx).data,
                     status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH", "DELETE"])
+def message_detail(request, conversation_id, message_id):
+    """Realtime edit/delete fallback for when the socket is down (mirrors WS)."""
+    conv = _get_membership_or_404(request.user, conversation_id)
+
+    if request.method == "DELETE":
+        try:
+            message = delete_message(conv, request.user, message_id)
+        except LookupError:
+            return Response({"detail": "Сообщение не найдено."},
+                            status=status.HTTP_404_NOT_FOUND)
+        except PermissionError:
+            return Response({"detail": "Можно удалять только свои сообщения."},
+                            status=status.HTTP_403_FORBIDDEN)
+        broadcast_delete(conv, message.id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PATCH -> edit text
+    try:
+        message = edit_message(conv, request.user, message_id,
+                               request.data.get("text", ""))
+    except LookupError:
+        return Response({"detail": "Сообщение не найдено."},
+                        status=status.HTTP_404_NOT_FOUND)
+    except PermissionError:
+        return Response({"detail": "Можно редактировать только свои сообщения."},
+                        status=status.HTTP_403_FORBIDDEN)
+    except ValueError as exc:
+        msg = {
+            "empty_message": "Сообщение пустое.",
+            "too_long": f"Слишком длинное сообщение (макс. {settings.MAX_MESSAGE_LENGTH}).",
+            "deleted": "Сообщение удалено.",
+        }.get(str(exc), "Не удалось изменить сообщение.")
+        return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+    broadcast_edit(message)
+    ctx = {"request": request, "me_id": request.user.id}
+    return Response(MessageSerializer(message, context=ctx).data)
 
 
 @api_view(["POST"])

@@ -55,6 +55,7 @@ export default function Messenger({ me, setMe, onLogout }) {
   const messagesRef = useRef({});
   const loadedHistory = useRef(new Set());
   const typingTimers = useRef({});
+  const offlineTimer = useRef(null);
   const handlerRef = useRef(() => {});
   activeIdRef.current = activeId;
   conversationsRef.current = conversations;
@@ -110,11 +111,24 @@ export default function Messenger({ me, setMe, onLogout }) {
   handlerRef.current = (evt) => {
     switch (evt.type) {
       case "_status":
-        setWsOnline(evt.online);
-        if (evt.online) resync();
+        // Going online shows instantly; going offline waits out a short grace
+        // window so a brief reconnect blip never flashes "подключение…".
+        clearTimeout(offlineTimer.current);
+        if (evt.online) {
+          setWsOnline(true);
+          resync();
+        } else {
+          offlineTimer.current = setTimeout(() => setWsOnline(false), 1500);
+        }
         return;
       case "message":
         onIncomingMessage(evt.message);
+        return;
+      case "edit":
+        onEditMessage(evt);
+        return;
+      case "delete":
+        onDeleteMessage(evt);
         return;
       case "message_error":
         onMessageError(evt);
@@ -218,6 +232,58 @@ export default function Messenger({ me, setMe, onLogout }) {
         if (c) openConversation(c);
       });
     }
+  }
+
+  // Realtime delete: turn the message into a "Сообщение удалено" tombstone for
+  // everyone in the dialog. Idempotent — re-marking an already-deleted message
+  // (e.g. our own optimistic delete echoed back) is a harmless no-op.
+  function tombstone(msg) {
+    return { ...msg, is_deleted: true, text: "", attachments: [], reply_to: null,
+             sending: false, error: false };
+  }
+
+  // Realtime edit: update the text + "ред." marker for everyone in the dialog.
+  function applyEdit(msg, evt) {
+    return { ...msg, text: evt.text, edited_at: evt.edited_at || new Date().toISOString() };
+  }
+
+  function onEditMessage(evt) {
+    const convId = evt.conversation_id;
+    setMessagesByConv((m) => {
+      const list = m[convId];
+      if (!list) return m;
+      return {
+        ...m,
+        [convId]: list.map((x) => (x.id === evt.message_id ? applyEdit(x, evt) : x)),
+      };
+    });
+    setConversations((cs) =>
+      cs.map((c) =>
+        c.id === convId && c.last_message?.id === evt.message_id
+          ? { ...c, last_message: applyEdit(c.last_message, evt) }
+          : c
+      )
+    );
+  }
+
+  function onDeleteMessage(evt) {
+    const convId = evt.conversation_id;
+    setMessagesByConv((m) => {
+      const list = m[convId];
+      if (!list) return m;
+      return {
+        ...m,
+        [convId]: list.map((x) => (x.id === evt.message_id ? tombstone(x) : x)),
+      };
+    });
+    // Reflect the tombstone in the sidebar preview if it was the last message.
+    setConversations((cs) =>
+      cs.map((c) =>
+        c.id === convId && c.last_message?.id === evt.message_id
+          ? { ...c, last_message: tombstone(c.last_message) }
+          : c
+      )
+    );
   }
 
   function onMessageError(evt) {
@@ -374,6 +440,33 @@ export default function Messenger({ me, setMe, onLogout }) {
     }
   }
 
+  function deleteMessage(convId, msgId) {
+    // Vanish instantly on my side; the broadcast removes it on the peer's side.
+    onDeleteMessage({ conversation_id: convId, message_id: msgId });
+    // An optimistic message that never reached the server: nothing to tell anyone.
+    if (String(msgId).startsWith("tmp_")) return;
+    const sent = socketRef.current?.send({
+      type: "delete",
+      conversation_id: convId,
+      message_id: msgId,
+    });
+    if (!sent) api.deleteMessage(convId, msgId).catch(() => {});
+  }
+
+  function editMessage(convId, msgId, text) {
+    const clean = (text || "").trim();
+    if (!clean) return;
+    // Reflect instantly on my side; broadcast updates the peer.
+    onEditMessage({ conversation_id: convId, message_id: msgId, text: clean });
+    const sent = socketRef.current?.send({
+      type: "edit",
+      conversation_id: convId,
+      message_id: msgId,
+      text: clean,
+    });
+    if (!sent) api.editMessage(convId, msgId, clean).catch(() => {});
+  }
+
   function sendTyping(convId, isTyping) {
     socketRef.current?.send({ type: "typing", conversation_id: convId, is_typing: isTyping });
   }
@@ -421,6 +514,8 @@ export default function Messenger({ me, setMe, onLogout }) {
         hasMore={activeConv ? !!hasMore[activeConv.id] : false}
         onLoadOlder={activeConv ? () => loadOlder(activeConv.id) : undefined}
         onSend={sendMessage}
+        onDelete={deleteMessage}
+        onEditSave={editMessage}
         onTyping={sendTyping}
         onBack={() => setActiveId(null)}
         composerLocked={composerLocked}

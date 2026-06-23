@@ -36,7 +36,8 @@ class ReplyPreviewSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Message
-        fields = ["id", "sender_id", "sender_nickname", "text", "has_attachment"]
+        fields = ["id", "sender_id", "sender_nickname", "text", "has_attachment",
+                  "is_deleted"]
 
     def get_has_attachment(self, obj):
         return obj.attachments.exists()
@@ -55,7 +56,7 @@ class MessageSerializer(serializers.ModelSerializer):
         fields = [
             "id", "conversation_id", "sender_id", "sender_nickname",
             "text", "client_id", "attachments", "reply_to", "is_read", "is_mine",
-            "is_deleted", "created_at",
+            "is_deleted", "edited_at", "created_at",
         ]
 
     def get_is_mine(self, obj):
@@ -92,6 +93,7 @@ class ConversationSerializer(serializers.ModelSerializer):
         return PublicUserSerializer(peer).data if peer else None
 
     def get_last_message(self, obj):
+        # A deleted last message still shows as a tombstone in the sidebar.
         msg = obj.messages.order_by("-created_at").first()
         if not msg:
             return None
@@ -105,5 +107,5 @@ class ConversationSerializer(serializers.ModelSerializer):
         if not membership:
             return 0
         return obj.messages.filter(
-            created_at__gt=membership.last_read_at
+            created_at__gt=membership.last_read_at, is_deleted=False
         ).exclude(sender=me).count()

@@ -9,5 +9,7 @@ urlpatterns = [
     path("conversations/<uuid:conversation_id>/accept/", views.accept_request),
     path("conversations/<uuid:conversation_id>/decline/", views.decline_request),
     path("conversations/<uuid:conversation_id>/messages/", views.messages),
+    path("conversations/<uuid:conversation_id>/messages/<uuid:message_id>/",
+         views.message_detail),
     path("conversations/<uuid:conversation_id>/read/", views.read),
 ]

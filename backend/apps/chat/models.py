@@ -69,6 +69,8 @@ class Message(models.Model):
         related_name="replies",
     )
     is_deleted = models.BooleanField(default=False)
+    # Set the first time a message is edited; drives the "ред." marker.
+    edited_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:

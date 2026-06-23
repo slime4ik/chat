@@ -9,13 +9,17 @@ from apps.accounts.models import User
 
 from .models import Conversation, Membership
 from .services import (
+    build_delete_sends,
+    build_edit_sends,
     build_new_message_sends,
     build_presence_sends,
     build_read_sends,
     build_typing_sends,
     conv_group,
     create_message,
+    delete_message,
     dispatch_sends,
+    edit_message,
     mark_read,
     user_group,
 )
@@ -76,6 +80,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         if action == "message":
             await self._handle_message(data)
+        elif action == "edit":
+            await self._handle_edit(data)
+        elif action == "delete":
+            await self._handle_delete(data)
         elif action == "read":
             await self._handle_read(data)
         elif action == "typing":
@@ -109,6 +117,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
         sends = await database_sync_to_async(build_new_message_sends)(message)
         await dispatch_sends(sends)
 
+    async def _handle_edit(self, data):
+        conv = await self._get_conversation(data.get("conversation_id"))
+        if not conv:
+            return
+        try:
+            message = await database_sync_to_async(edit_message)(
+                conv, self.user, data.get("message_id"), data.get("text", "")
+            )
+        except (LookupError, PermissionError, ValueError):
+            return
+        sends = await database_sync_to_async(build_edit_sends)(message)
+        await dispatch_sends(sends)
+
+    async def _handle_delete(self, data):
+        conv = await self._get_conversation(data.get("conversation_id"))
+        if not conv:
+            return
+        try:
+            message = await database_sync_to_async(delete_message)(
+                conv, self.user, data.get("message_id")
+            )
+        except (LookupError, PermissionError):
+            return  # gone already or not the sender's to delete
+        sends = await database_sync_to_async(build_delete_sends)(conv, message.id)
+        await dispatch_sends(sends)
+
     async def _handle_read(self, data):
         conv = await self._get_conversation(data.get("conversation_id"))
         if not conv:
@@ -137,6 +171,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
     # --- outbound (group -> client) ------------------------------------
     async def chat_message(self, event):
         await self.send(json.dumps({"type": "message", "message": event["message"]}))
+
+    async def chat_edit(self, event):
+        await self.send(json.dumps({
+            "type": "edit",
+            "conversation_id": event["conversation_id"],
+            "message_id": event["message_id"],
+            "text": event["text"],
+            "edited_at": event["edited_at"],
+        }))
+
+    async def chat_delete(self, event):
+        await self.send(json.dumps({
+            "type": "delete",
+            "conversation_id": event["conversation_id"],
+            "message_id": event["message_id"],
+        }))
 
     async def chat_read(self, event):
         await self.send(json.dumps({

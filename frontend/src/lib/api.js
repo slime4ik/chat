@@ -91,6 +91,10 @@ export const api = {
   },
   sendMessage: (convId, payload) =>
     request(`/conversations/${convId}/messages/`, { method: "POST", body: payload }),
+  deleteMessage: (convId, msgId) =>
+    request(`/conversations/${convId}/messages/${msgId}/`, { method: "DELETE" }),
+  editMessage: (convId, msgId, text) =>
+    request(`/conversations/${convId}/messages/${msgId}/`, { method: "PATCH", body: { text } }),
   markRead: (convId) =>
     request(`/conversations/${convId}/read/`, { method: "POST" }),
 };

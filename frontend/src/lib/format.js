@@ -16,6 +16,7 @@ export function formatLastSeen(iso) {
 
 export function shortPreview(message) {
   if (!message) return "Сообщений пока нет";
+  if (message.is_deleted) return "Сообщение удалено";
   if (message.text) return message.text;
   const att = message.attachments && message.attachments[0];
   if (att) {

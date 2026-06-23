@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Paperclip, Send, X, FileText, Film, CornerUpLeft } from "lucide-react";
+import { Paperclip, Send, X, FileText, Film, CornerUpLeft, Pencil, Check } from "lucide-react";
 import { uploadFile, fileKind } from "../lib/upload.js";
 import { humanSize } from "../lib/format.js";
 
 let localId = 0;
 const MAX_LEN = 1500;
 
-export default function MessageInput({ replyTo, onCancelReply, onSend, onTyping }) {
+export default function MessageInput({
+  replyTo, editing, onCancelReply, onCancelEdit, onEditSave, onSend, onTyping,
+}) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState([]);
   const fileRef = useRef(null);
@@ -21,6 +23,23 @@ export default function MessageInput({ replyTo, onCancelReply, onSend, onTyping 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Entering/leaving edit mode swaps the composer text for the message being
+  // edited (and clears it again on cancel/save).
+  useEffect(() => {
+    setText(editing ? editing.text || "" : "");
+    if (editing) {
+      requestAnimationFrame(() => {
+        autoGrow();
+        const el = taRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing?.id]);
 
   function autoGrow() {
     const el = taRef.current;
@@ -76,9 +95,17 @@ export default function MessageInput({ replyTo, onCancelReply, onSend, onTyping 
   }
 
   const uploading = attachments.some((a) => !a.uploadId && !a.error);
-  const canSend = (text.trim() || attachments.some((a) => a.uploadId)) && !uploading;
+  const canSend = editing
+    ? !!text.trim()
+    : (text.trim() || attachments.some((a) => a.uploadId)) && !uploading;
 
   function submit() {
+    if (editing) {
+      const t = text.trim().slice(0, MAX_LEN);
+      if (!t) return;
+      onEditSave(t);
+      return;
+    }
     if (!canSend) return;
     const ready = attachments.filter((a) => a.uploadId);
     const upload_ids = ready.map((a) => a.uploadId);
@@ -106,12 +133,35 @@ export default function MessageInput({ replyTo, onCancelReply, onSend, onTyping 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submit();
+    } else if (e.key === "Escape" && editing) {
+      e.preventDefault();
+      onCancelEdit();
     }
   }
 
   return (
     <div className="border-t border-ink-700 bg-ink-800 px-2 sm:px-3 py-2 shrink-0">
-      {replyTo && (
+      {editing && (
+        <div className="flex items-center gap-2 mb-2 bg-ink-900 border-l-2 border-accent rounded-lg px-3 py-1.5">
+          <Pencil size={16} className="text-accent shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-accent font-medium truncate">
+              Редактирование
+            </div>
+            <div className="text-xs text-slate-400 truncate">
+              {editing.text || "Вложение"}
+            </div>
+          </div>
+          <button
+            onClick={onCancelEdit}
+            className="shrink-0 text-slate-400 hover:text-slate-200"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
+      {!editing && replyTo && (
         <div className="flex items-center gap-2 mb-2 bg-ink-900 border-l-2 border-accent rounded-lg px-3 py-1.5">
           <CornerUpLeft size={16} className="text-accent shrink-0" />
           <div className="flex-1 min-w-0">
@@ -131,7 +181,7 @@ export default function MessageInput({ replyTo, onCancelReply, onSend, onTyping 
         </div>
       )}
 
-      {attachments.length > 0 && (
+      {!editing && attachments.length > 0 && (
         <div className="flex gap-2 flex-wrap mb-2">
           {attachments.map((a) => (
             <div
@@ -170,21 +220,25 @@ export default function MessageInput({ replyTo, onCancelReply, onSend, onTyping 
       )}
 
       <div className="flex items-end gap-2">
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="h-10 w-10 shrink-0 rounded-full bg-ink-700 hover:bg-ink-600 grid place-items-center text-slate-300"
-          title="Прикрепить фото или видео"
-        >
-          <Paperclip size={20} />
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*,video/*"
-          multiple
-          hidden
-          onChange={pickFiles}
-        />
+        {!editing && (
+          <>
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="h-10 w-10 shrink-0 rounded-full bg-ink-700 hover:bg-ink-600 grid place-items-center text-slate-300"
+              title="Прикрепить фото или видео"
+            >
+              <Paperclip size={20} />
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              hidden
+              onChange={pickFiles}
+            />
+          </>
+        )}
         <div className="flex-1 min-w-0 relative">
           <textarea
             ref={taRef}
@@ -197,7 +251,7 @@ export default function MessageInput({ replyTo, onCancelReply, onSend, onTyping 
               signalTyping();
             }}
             onKeyDown={onKeyDown}
-            placeholder="Напишите сообщение…"
+            placeholder={editing ? "Редактирование сообщения…" : "Напишите сообщение…"}
             className="w-full resize-none px-3 py-2.5 rounded-2xl bg-ink-900 border border-ink-600 focus:border-accent outline-none text-[15px] leading-snug"
           />
           {text.length > MAX_LEN - 200 && (
@@ -210,9 +264,13 @@ export default function MessageInput({ replyTo, onCancelReply, onSend, onTyping 
           onClick={submit}
           disabled={!canSend}
           className="h-10 w-10 shrink-0 rounded-full bg-accent hover:bg-accent-soft grid place-items-center disabled:opacity-40 transition"
-          title="Отправить"
+          title={editing ? "Сохранить" : "Отправить"}
         >
-          <Send size={18} className="text-white -ml-0.5" />
+          {editing ? (
+            <Check size={18} className="text-white" />
+          ) : (
+            <Send size={18} className="text-white -ml-0.5" />
+          )}
         </button>
       </div>
     </div>

@@ -6,9 +6,10 @@ import { formatLastSeen, initials } from "../lib/format.js";
 
 export default function ChatWindow({
   me, conv, messages, peerPresence, peerTyping, hasMore, onLoadOlder,
-  onSend, onTyping, onBack, composerLocked, lockReason,
+  onSend, onDelete, onEditSave, onTyping, onBack, composerLocked, lockReason,
 }) {
   const [replyTo, setReplyTo] = useState(null);
+  const [editing, setEditing] = useState(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollRef = useRef(null);
@@ -16,7 +17,10 @@ export default function ChatWindow({
   const restoreHeight = useRef(0);
   const openedConvId = useRef(null);
 
-  useEffect(() => setReplyTo(null), [conv?.id]);
+  useEffect(() => {
+    setReplyTo(null);
+    setEditing(null);
+  }, [conv?.id]);
 
   // При открытии чата сразу прыгаем к самым свежим сообщениям (как в обычных
   // мессенджерах). Срабатывает один раз на каждый открытый чат — дальше скролл
@@ -133,7 +137,19 @@ export default function ChatWindow({
           <div className="text-center text-xs text-slate-500 py-2">Загрузка…</div>
         )}
         {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} onReply={() => setReplyTo(m)} />
+          <MessageBubble
+            key={m.id}
+            message={m}
+            onReply={() => {
+              setEditing(null);
+              setReplyTo(m);
+            }}
+            onDelete={() => onDelete(conv.id, m.id)}
+            onEdit={() => {
+              setReplyTo(null);
+              setEditing(m);
+            }}
+          />
         ))}
         {peerTyping && (
           <div className="flex justify-start">
@@ -165,7 +181,13 @@ export default function ChatWindow({
         <MessageInput
           key={conv.id}
           replyTo={replyTo}
+          editing={editing}
           onCancelReply={() => setReplyTo(null)}
+          onCancelEdit={() => setEditing(null)}
+          onEditSave={(text) => {
+            onEditSave(conv.id, editing.id, text);
+            setEditing(null);
+          }}
           onSend={handleSend}
           onTyping={(t) => onTyping(conv.id, t)}
         />

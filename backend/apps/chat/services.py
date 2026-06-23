@@ -190,6 +190,59 @@ def mark_read(conversation: Conversation, user: User):
     return now
 
 
+def edit_message(conversation: Conversation, user: User, message_id, text) -> Message:
+    """Edit a message's text. Only its sender may edit, deleted ones can't be."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("empty_message")
+    if len(text) > settings.MAX_MESSAGE_LENGTH:
+        raise ValueError("too_long")
+    with transaction.atomic():
+        message = (
+            Message.objects.select_for_update()
+            .filter(id=message_id, conversation=conversation)
+            .first()
+        )
+        if not message:
+            raise LookupError("not_found")
+        if message.sender_id != user.id:
+            raise PermissionError("forbidden")
+        if message.is_deleted:
+            raise ValueError("deleted")
+        if message.text != text:
+            message.text = text
+            message.edited_at = timezone.now()
+            message.save(update_fields=["text", "edited_at"])
+    return message
+
+
+def delete_message(conversation: Conversation, user: User, message_id) -> Message:
+    """
+    Soft-delete a message. Only its sender may remove it.
+
+    We keep the row (replies pointing at it stay intact) but flag it as deleted
+    so the history endpoint and the sidebar preview stop returning it. The actual
+    "vanish for both" is driven by the realtime `chat.delete` broadcast.
+    """
+    with transaction.atomic():
+        message = (
+            Message.objects.select_for_update()
+            .filter(id=message_id, conversation=conversation)
+            .first()
+        )
+        if not message:
+            raise LookupError("not_found")
+        if message.sender_id != user.id:
+            raise PermissionError("forbidden")
+        if not message.is_deleted:
+            message.is_deleted = True
+            message.text = ""
+            message.save(update_fields=["is_deleted", "text"])
+            # The bytes are no longer reachable from any visible message.
+            message.attachments.all().delete()
+    return message
+
+
 # --- Broadcasting -------------------------------------------------------
 def _serialize_for(message: Message, viewer: User):
     other = message.conversation.other_member(viewer)
@@ -218,6 +271,32 @@ def build_new_message_sends(message: Message):
         sends.append((user_group(viewer.id),
                       {"type": "chat.message", "message": payload}))
     return sends
+
+
+def build_edit_sends(message: Message):
+    """Tell everyone in the dialog the message's text changed."""
+    return [(
+        conv_group(message.conversation_id),
+        {
+            "type": "chat.edit",
+            "conversation_id": str(message.conversation_id),
+            "message_id": str(message.id),
+            "text": message.text,
+            "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+        },
+    )]
+
+
+def build_delete_sends(conversation: Conversation, message_id):
+    """Tell everyone in the dialog to drop this message from their view."""
+    return [(
+        conv_group(conversation.id),
+        {
+            "type": "chat.delete",
+            "conversation_id": str(conversation.id),
+            "message_id": str(message_id),
+        },
+    )]
 
 
 def build_read_sends(conversation: Conversation, reader: User, read_at):
@@ -315,6 +394,14 @@ def broadcast_new_message(message: Message):
 
 def broadcast_read(conversation: Conversation, reader: User, read_at):
     async_to_sync(dispatch_sends)(build_read_sends(conversation, reader, read_at))
+
+
+def broadcast_delete(conversation: Conversation, message_id):
+    async_to_sync(dispatch_sends)(build_delete_sends(conversation, message_id))
+
+
+def broadcast_edit(message: Message):
+    async_to_sync(dispatch_sends)(build_edit_sends(message))
 
 
 def broadcast_typing(conversation: Conversation, user: User, is_typing: bool):
