@@ -111,7 +111,7 @@ export default function AuthScreen({ onAuthed }) {
               </defs>
             </svg>
           </div>
-          <div className="text-3xl font-bold tracking-tight">Blank v2</div>
+          <div className="text-3xl font-bold tracking-tight">Blank</div>
           <p className="text-slate-400 text-sm mt-1">
             Анонимный мессенджер без привязки к личности.
           </p>
